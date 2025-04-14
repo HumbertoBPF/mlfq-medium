@@ -7,16 +7,18 @@ TIMER_INTERRUPT = 1
 
 
 class JobQueue:
-    def __init__(self, jobs: List[Job], next_job: int):
+    def __init__(self, jobs: List[Tuple[Job, int]], next_job: int):
+        # The list of jobs stores, besides the job itself, the spent time in this queue
         self.jobs = jobs
         self.next_job = next_job
 
 
 class MLFQScheduler(Plotter):
-    def __init__(self, n_queues):
+    def __init__(self, n_queues, time_allotment):
         super().__init__()
 
         self.n_queues = n_queues
+        self.time_allotment = time_allotment
         self.queues: List[JobQueue] = [JobQueue([], 0) for _ in range(n_queues)]
         self.incoming_jobs = []
 
@@ -26,7 +28,8 @@ class MLFQScheduler(Plotter):
         :return: the index of the queue to be processed next
         """
         for i in range(self.n_queues - 1, -1, -1):
-            if len(self.queues[i].jobs) > 0:
+            queued_jobs = self.queues[i].jobs
+            if len(queued_jobs) > 0:
                 return i
 
         return None
@@ -38,11 +41,12 @@ class MLFQScheduler(Plotter):
         :return:
         """
         job_queue = self.queues[priority]
+
         queued_jobs = job_queue.jobs
         job_index = job_queue.next_job
 
         # Run job
-        running_job = queued_jobs[job_index]
+        running_job, spent_time = queued_jobs[job_index]
         delta_t = min(running_job.execution_time, TIMER_INTERRUPT)
         running_job.run(delta_t=delta_t)
 
@@ -54,11 +58,15 @@ class MLFQScheduler(Plotter):
         # every time a job runs
         remaining_time = running_job.execution_time - delta_t
         running_job.execution_time = remaining_time
-        queued_jobs[job_index] = running_job
+        queued_jobs[job_index] = (running_job, spent_time + delta_t)
 
-        # Remove the job if it is completed
+        # Remove the job if it is completed or if it spent all the time allotment
         if remaining_time == 0:
             del queued_jobs[job_index]
+        # If the job has spent all its allotment and the job is not in the bottom queue, move it to the queue below
+        elif (priority != 0) and (spent_time + delta_t >= self.time_allotment):
+            del queued_jobs[job_index]
+            self.queues[priority - 1].jobs.append((running_job, 0))
 
         # Update the job index to loop through the queue
         job_index -= 1
@@ -78,23 +86,19 @@ class MLFQScheduler(Plotter):
         :return:
         """
         while len(self.incoming_jobs) > 0:
-            job, priority = self.incoming_jobs[-1]
+            job = self.incoming_jobs[-1]
 
             if job.arriving_time <= self.t:
                 self.incoming_jobs.pop()
-                self.queues[priority].jobs.append(job)
+                # When a job joins the scheduler, it is assigned to the top queue
+                self.queues[self.n_queues - 1].jobs.append((job, 0))
                 continue
 
             break
 
-    def run(self, jobs: List[Tuple[Job, int]]):
-        # Validate priority values
-        for job, priority in jobs:
-            if priority >= self.n_queues or priority < 0:
-                raise AttributeError("Priority cannot be negative")
-
+    def run(self, jobs: List[Job]):
         # Jobs are sorted by arrival time to make adding jobs to the scheduler easier
-        self.incoming_jobs = sorted(jobs, key=lambda job: -job[0].arriving_time)
+        self.incoming_jobs = sorted(jobs, key=lambda job: -job.arriving_time)
 
         # Insert jobs arriving at t = 0 in the corresponding queues
         self._check_for_incoming_jobs()
