@@ -71,7 +71,7 @@ class MLFQScheduler(Plotter):
 
         # Run job
         running_job, spent_time = queued_jobs[job_index]
-        delta_t = min(running_job.execution_time, TIMER_INTERRUPT)
+        delta_t = min(running_job.execution_time, (self.n_queues - priority)*TIMER_INTERRUPT)
         running_job.run(delta_t=delta_t)
 
         # Update scheduler's state
@@ -88,7 +88,7 @@ class MLFQScheduler(Plotter):
         if remaining_time == 0:
             del queued_jobs[job_index]
         # If the job has spent all its allotment and the job is not in the bottom queue, move it to the queue below
-        elif (priority != 0) and (spent_time + delta_t >= self.time_allotment):
+        elif (priority != 0) and (spent_time + delta_t >= (self.n_queues - priority)*self.time_allotment):
             del queued_jobs[job_index]
             self.queues[priority - 1].jobs.append((running_job, 0))
 
