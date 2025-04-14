@@ -14,11 +14,12 @@ class JobQueue:
 
 
 class MLFQScheduler(Plotter):
-    def __init__(self, n_queues, time_allotment):
+    def __init__(self, n_queues, time_allotment, time_priority_boost):
         super().__init__()
 
         self.n_queues = n_queues
         self.time_allotment = time_allotment
+        self.time_priority_boost = time_priority_boost
         self.queues: List[JobQueue] = [JobQueue([], 0) for _ in range(n_queues)]
         self.incoming_jobs = []
 
@@ -33,6 +34,29 @@ class MLFQScheduler(Plotter):
                 return i
 
         return None
+
+    def _priority_boost(self):
+        """
+        Moves all the jobs from lower queues to the top-most queue and reset their current state (i.e., jobs
+        to be run next)
+        :return:
+        """
+        # Move all the jobs from lower queues to the top-most queue
+        for i in range(0, self.n_queues - 1):
+            while len(self.queues[i].jobs) > 0:
+                job, _ = self.queues[i].jobs.pop()
+                self.queues[self.n_queues - 1].jobs.append((job, 0))
+
+            # Reset the next job of lower queues
+            self.queues[i].next_job = 0
+
+        # Resets the next job of the top-most queue
+        self.queues[self.n_queues - 1].next_job = 0
+
+        # Set the spent time in the top-most queue to 0
+        for i in range(0, len(self.queues[self.n_queues - 1].jobs)):
+            job, _ = self.queues[self.n_queues - 1].jobs[i]
+            self.queues[self.n_queues - 1].jobs[i] = (job, 0)
 
     def _run_queue_in_round_robin(self, priority: int):
         """
@@ -104,6 +128,7 @@ class MLFQScheduler(Plotter):
         self._check_for_incoming_jobs()
 
         highest_priority = self._get_highest_priority()
+        last_priority_boost = 0
 
         while (len(self.incoming_jobs) > 0) or (highest_priority is not None):
             # If there is no job currently scheduled, only increment the timestamp
@@ -112,6 +137,11 @@ class MLFQScheduler(Plotter):
             # If there are jobs scheduled, run them in Round Robin
             else:
                 self._run_queue_in_round_robin(priority=highest_priority)
+
+            # Check if it's time of a priority boost
+            if (self.t - last_priority_boost) >= self.time_priority_boost:
+                last_priority_boost = self.t
+                self._priority_boost()
 
             self._check_for_incoming_jobs()
             highest_priority = self._get_highest_priority()
